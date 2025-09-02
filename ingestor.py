@@ -42,7 +42,7 @@ class ThinkCleaner(TransformComponent):
         return nodes
 
 
-def get_nodes_from_a_document(doc_path):
+def get_nodes_from_a_document(doc_path: str):
     """
     Reads a given document, chunks it into pieces, and makes nodes to store in chroma db.
     Also enriches nodes with metadata: filename, title and questions tha may be answered by the node.
@@ -76,11 +76,13 @@ def get_nodes_from_a_document(doc_path):
         del node.metadata['version']
         del node.metadata['schema_name']
         del node.metadata['origin']
+        if 'headings' in node.metadata:
+            del node.metadata['headings']
 
     return nodes
 
 
-def save_nodes_to_chroma(nodes, collection_name):
+def save_nodes_to_chroma(nodes, collection_name: str, file_name: str) -> None:
     """Saves nodes to chroma db."""
     db = chromadb.PersistentClient(path=settings.CHROMA_PERSIST_DIR)
     chroma_collection = db.get_or_create_collection(collection_name)
@@ -89,16 +91,18 @@ def save_nodes_to_chroma(nodes, collection_name):
     _index = VectorStoreIndex(
         nodes, storage_context=storage_context, embed_model=embed_model
     )
+    chroma_collection.modify(metadata={file_name: "source file"})
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description='Process a document and store it in ChromaDB')
     parser.add_argument('file_path', help='Path to the document file to process')
     parser.add_argument('collection_name', help='Name of the ChromaDB collection to store the data')
     args = parser.parse_args()
 
     nodes = get_nodes_from_a_document(doc_path=args.file_path)
-    save_nodes_to_chroma(nodes, collection_name=args.collection_name)
+    file_name = args.file_path.split("/")[-1]
+    save_nodes_to_chroma(nodes, collection_name=args.collection_name, file_name=file_name)
 
 
 if __name__ == "__main__":
