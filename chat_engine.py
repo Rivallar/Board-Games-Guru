@@ -17,9 +17,19 @@ query_llm = Ollama(model=settings.LLM_MODEL, **settings.LLM_KWARGS)
 embed_model = HuggingFaceEmbedding(model_name=settings.EMBEDDING_MODEL)
 
 
+def get_collection_files(chroma_collection) -> list[str]:
+    """Fetches special chroma_collection metadata keys corresponding to names of ingested files"""
+    files = []
+    for k, v in chroma_collection.metadata.items():
+        if v == "source file":
+            files.append(k)
+    return files
+
+
 def get_chat_engine(collection_name: str):
     db = chromadb.PersistentClient(path=settings.CHROMA_PERSIST_DIR)
     chroma_collection = db.get_or_create_collection(collection_name)
+    collection_files = get_collection_files(chroma_collection)
     vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
     chat_index = VectorStoreIndex.from_vector_store(
             vector_store,
@@ -50,7 +60,7 @@ def get_chat_engine(collection_name: str):
     query_engine.update_prompts(
         {"response_synthesizer:text_qa_template": prompt_tmpl}
     )
-    return query_engine
+    return query_engine, collection_files
 
 
 def main():
