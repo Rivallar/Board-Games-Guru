@@ -12,7 +12,12 @@ def go_to_step2(game_name: str):
 if "step" not in st.session_state:
     st.session_state.step = 1
 
-st.title("Board Games Guru")
+col1, col2 = st.columns([4, 1])
+with col1:
+    st.title("Board Games Guru")
+with col2:
+    debug_mode = st.toggle("Debug Mode", False)
+
 if st.session_state.step == 1:
     st.subheader("Pick a game")
     col1, col2, col3 = st.columns(3)
@@ -34,4 +39,17 @@ if st.session_state.step == 2:
         if specific_files:
             question += f"\nLook for the answer in this files: {', '.join(specific_files)}"
         response = chat_engine.query(question)
-        st.write(utils.clear_thinking(text=response.response))
+        if not debug_mode:
+            st.write(utils.clear_thinking(text=response.response))
+        else:
+            st.write(f"Your question: {question}")
+            st.write("Prompts: ")
+            st.write(chat_engine.get_prompts())
+            st.write("Response: ")
+            st.write(response.response)
+            st.write("Nodes: ")
+            st.write(response.source_nodes)
+            st.write("Metadata: ")
+            st.write(response.metadata)
+
+
