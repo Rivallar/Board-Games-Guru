@@ -3,9 +3,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-SMALL_LLM = os.getenv("SMALL_LLM", "qwen3:1.7b")
+SMALL_LLM = os.getenv("SMALL_LLM", "qwen3:4b-q4_K_M")
 LLM_MODEL = os.getenv("LLM_MODEL", "qwen3:8b")
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "BAAI/bge-large-en-v1.5")
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "Qwen/Qwen3-Embedding-0.6B")
 CHROMA_PERSIST_DIR = os.getenv("CHROMA_PERSIST_DIR", "./storage/chroma")
 
 MAX_CHUNK_TOKENS = int(os.getenv("MAX_CHUNK_TOKENS", "1000"))
