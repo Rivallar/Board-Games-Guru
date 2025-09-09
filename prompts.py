@@ -36,3 +36,9 @@ QUERY_RESPONSE_TEMPLATE = """ \
     Here is the question and context for you to work with:
     \nQuestion: {question} \nContext: {context} \nAnswer:
     """
+
+SUMMARY_TMPL = """ \
+    Here is the content of the section:\n{context_str} \ 
+    Summarize the key topics and entities of the section in one short sentence. \
+    Summary:
+    """

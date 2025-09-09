@@ -3,13 +3,12 @@ This script helps to add new documents to ChromaDB.
 Just run a command in a terminal: ingestor.py path_to_document db_collection_name
 """
 import argparse
-import re
 
 import chromadb
 from docling_core.transforms.chunker.tokenizer.huggingface import HuggingFaceTokenizer
 from docling.chunking import HybridChunker
 from llama_index.core.extractors import (
-    TitleExtractor,
+    SummaryExtractor,
     QuestionsAnsweredExtractor,
 )
 from llama_index.core import StorageContext, VectorStoreIndex
@@ -29,16 +28,34 @@ metadata_llm = Ollama(model=settings.SMALL_LLM, **settings.LLM_KWARGS)
 embed_model = HuggingFaceEmbedding(model_name=settings.EMBEDDING_MODEL)
 
 
-class ThinkCleaner(TransformComponent):
-    """Cleans thinking section of llm in title and questions metadata fields"""
+class MetadataCleaner(TransformComponent):
+    """Transforms metadata dictionary to a desired state"""
+
+    @classmethod
+    def clean_thinking(cls, text: str) -> str:
+        """Cleans thinking section of llm in metadata fields"""
+        end_pattern = "</think>"
+        end_ind = text.find(end_pattern)
+        if end_ind == -1:
+            return text
+
+        cleaned_text = text[end_ind + len(end_pattern):].strip()
+        return cleaned_text
 
     def __call__(self, nodes, **kwargs):
-        pattern = r"<think>.*?\n</think>\n\n"
+
         for node in nodes:
-            node.metadata["document_title"] = re.sub(pattern, "", node.metadata["document_title"])
-            node.metadata["questions_this_excerpt_can_answer"] = re.sub(
-                pattern, "", node.metadata["questions_this_excerpt_can_answer"]
-            )
+            node.text_template = "Metadata:\n{metadata_str}\n-----\nContent:\n{content}"
+            node.metadata["source_file"] = node.metadata["origin"]['filename']
+            node.metadata["questions_this_excerpt_can_answer"] = self.clean_thinking(
+                node.metadata["questions_this_excerpt_can_answer"])
+            for key in node.excluded_embed_metadata_keys:
+                del node.metadata[key]
+            if "headings" in node.metadata:
+                node.metadata["headings"] = ", ".join(node.metadata["headings"])
+            for summary in ("prev_section_summary", "next_section_summary", "section_summary"):
+                if summary in node.metadata:
+                    node.metadata[summary] = self.clean_thinking(node.metadata[summary])
         return nodes
 
 
@@ -49,6 +66,7 @@ def get_nodes_from_a_document(doc_path: str):
     """
     tokenizer = HuggingFaceTokenizer(
         tokenizer=AutoTokenizer.from_pretrained(settings.EMBEDDING_MODEL),
+        max_tokens=1024
     )
 
     chunker = HybridChunker(
@@ -57,9 +75,13 @@ def get_nodes_from_a_document(doc_path: str):
     )
 
     node_parser = DoclingNodeParser(chunker=chunker)
-    title_extractor = TitleExtractor(nodes=5, combine_template=prompts.TITLE_GEN_TEMPLATE, llm=metadata_llm)
+    summary_extractor = SummaryExtractor(
+        summaries=["self", "prev", "next"],
+        llm=metadata_llm,
+        prompt_template=prompts.SUMMARY_TMPL,
+    )
     qa_extractor = QuestionsAnsweredExtractor(questions=3, prompt_template=prompts.QUESTION_GEN_TMPL, llm=metadata_llm)
-    pipeline = IngestionPipeline(transformations=[node_parser, title_extractor, qa_extractor, ThinkCleaner()])
+    pipeline = IngestionPipeline(transformations=[node_parser, summary_extractor, qa_extractor, MetadataCleaner()])
 
     reader = DoclingReader(export_type=DoclingReader.ExportType.JSON)
 
@@ -68,17 +90,6 @@ def get_nodes_from_a_document(doc_path: str):
                          in_place=True,
                          show_progress=True
                          )
-
-    for node in nodes:
-        node.text_template = "Metadata:\n{metadata_str}\n-----\nContent:\n{content}"
-        node.metadata["source_file"] = node.metadata["origin"]['filename']
-        del node.metadata['doc_items']
-        del node.metadata['version']
-        del node.metadata['schema_name']
-        del node.metadata['origin']
-        if 'headings' in node.metadata:
-            del node.metadata['headings']
-
     return nodes
 
 
