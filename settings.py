@@ -17,7 +17,7 @@ RERANK_TOP_N = int(os.getenv("RERANK_TOP_N", "6"))
 LLM_KWARGS = {
     "temperature": 0.2,
     "top_p": 0.9,
-    "repeat_penalty": 1.05,
+    "repeat_penalty": 1.1,
     "num_ctx": 8192,
-    "request_timeout": 120,
+    "request_timeout": 180,
 }

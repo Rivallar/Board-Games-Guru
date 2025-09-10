@@ -1,5 +1,7 @@
 import chromadb
 
+import hashlib
+
 import settings
 
 
@@ -16,3 +18,11 @@ def get_chroma_collection_names() -> list[str]:
     db = chromadb.PersistentClient(path=settings.CHROMA_PERSIST_DIR)
     collections = db.list_collections()
     return [collection.name for collection in collections]
+
+
+def make_stable_node_id(text: str, source: str) -> str:
+    """Returns hash of a node"""
+    h = hashlib.sha256()
+    h.update(source.encode("utf-8"))
+    h.update(text.encode("utf-8"))
+    return h.hexdigest()
