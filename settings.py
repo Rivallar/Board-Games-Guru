@@ -7,6 +7,7 @@ SMALL_LLM = os.getenv("SMALL_LLM", "qwen3:4b-q4_K_M")
 LLM_MODEL = os.getenv("LLM_MODEL", "qwen3:8b")
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "Qwen/Qwen3-Embedding-0.6B")
 CHROMA_PERSIST_DIR = os.getenv("CHROMA_PERSIST_DIR", "./storage/chroma")
+N_WORKERS = os.getenv("N_WORKERS", 2)
 
 MAX_CHUNK_TOKENS = int(os.getenv("MAX_CHUNK_TOKENS", "1000"))
 CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "150"))
