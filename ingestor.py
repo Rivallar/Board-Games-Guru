@@ -5,6 +5,7 @@ Just run a command in a terminal: ingestor.py path_to_document db_collection_nam
 import argparse
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import fitz
+import logging
 import os
 import tempfile
 from typing import Iterable
@@ -24,6 +25,17 @@ from transformers import AutoTokenizer
 
 import settings
 import utils
+
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.WARNING)
+logger = logging.getLogger("board_games_guru.ingestor")
+logger.setLevel(logging.INFO)
+if not logger.handlers:
+    _handler = logging.StreamHandler()
+    _formatter = logging.Formatter("%(levelname)s: %(message)s")
+    _handler.setFormatter(_formatter)
+    logger.addHandler(_handler)
+logger.propagate = False
 
 
 embed_model = HuggingFaceEmbedding(
@@ -60,7 +72,6 @@ def process_document_range(doc_path: str, start_page: int, end_page: int, temp_d
 
 def get_docs_from_a_pdf_in_parallel(doc_path: str) -> list[Document]:
     """Process a pdf in parallel over page ranges and return list of documents."""
-    print("Параллельно обрабатываем ноды")
     max_workers = int(settings.N_WORKERS)
     pdf = fitz.open(doc_path)
     try:
@@ -78,7 +89,7 @@ def get_docs_from_a_pdf_in_parallel(doc_path: str) -> list[Document]:
         end = min(num_pages, start + pages_per_chunk - 1)
         ranges.append((start, end))
         start = end + 1
-    print(f"Нарезали на рэнджи: {ranges}")
+    logger.info(f"Step 1. PDF file has {num_pages} pages. Will be processed in {len(ranges)} chunks.")
 
     with tempfile.TemporaryDirectory() as temp_dir:
         tasks = [(doc_path, s, e, temp_dir) for (s, e) in ranges]
@@ -86,7 +97,7 @@ def get_docs_from_a_pdf_in_parallel(doc_path: str) -> list[Document]:
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
             futures = [executor.submit(process_document_range, *t) for t in tasks]
             for fut in as_completed(futures):
-                print("Параллельный процесс что-то сделал")
+                logger.info("Step 1. A chunk is done.")
                 results.append(fut.result())
 
     results.sort(key=lambda r: r[1])
@@ -101,6 +112,7 @@ def get_documents_from_a_file(file_path: str) -> Iterable[Document]:
     """Reads a given file with DoclingReader and returns a list of Documents.
     Uses multiprocessing for pdf to accelerate a process for big files."""
     if file_path.endswith(".pdf"):
+        logger.info("Step 1. Processing a PDF file. Will take some time...")
         docs = get_docs_from_a_pdf_in_parallel(file_path)
     else:
         reader = DoclingReader(export_type=DoclingReader.ExportType.JSON)
@@ -125,6 +137,7 @@ def make_nodes(docs: Iterable[Document]) -> Iterable[BaseNode]:
     pipeline = IngestionPipeline(transformations=[node_parser, MetadataCleaner()])
 
     nodes = pipeline.run(documents=list(docs), in_place=True, show_progress=False)
+    logger.info(f"Step 2. Got {len(nodes)} nodes from a file.")
     return nodes
 
 
@@ -169,7 +182,7 @@ def save_nodes_to_chroma(nodes, collection_name: str, file_name: str) -> None:
     db = chromadb.PersistentClient(path=settings.CHROMA_PERSIST_DIR)
     chroma_collection = db.get_or_create_collection(collection_name)
     records_before = chroma_collection.count()
-    print(f"Было записей в коллекции: {records_before}")
+    logger.info(f"Step 3. {collection_name} collection had {records_before} records before.")
     vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
     storage_context = StorageContext.from_defaults(vector_store=vector_store)
     _index = VectorStoreIndex(
@@ -179,7 +192,8 @@ def save_nodes_to_chroma(nodes, collection_name: str, file_name: str) -> None:
     existing_metadata[file_name] = "source file"
     chroma_collection.modify(metadata=existing_metadata)
     records_now = chroma_collection.count()
-    print(f"Сохранено записей в коллекции: {records_now - records_before}")
+    logger.info(f"Step 3. {collection_name} collection has {records_now} records now.")
+    logger.info(f"Step 3. Saved {records_now - records_before} new nodes.")
 
 
 def main() -> None:
@@ -187,11 +201,15 @@ def main() -> None:
     parser.add_argument('file_path', help='Path to the document file to process')
     parser.add_argument('collection_name', help='Name of the ChromaDB collection to store the data')
     args = parser.parse_args()
+    logger.info(f"Ingestion started. \nProcessing {args.file_path} to {args.collection_name} collection.")
+    logger.info("Step 1. Preparing documents.")
     documents = get_documents_from_a_file(args.file_path)
+    logger.info("Step 2. Making nodes.")
     nodes = make_nodes(documents)
-    print(f"Получили {len(nodes)} нодов.")
+    logger.info("Step 3. Embedding and saving nodes to a database.")
     file_name = os.path.basename(args.file_path)
     save_nodes_to_chroma(nodes, collection_name=args.collection_name, file_name=file_name)
+    logger.info("Ingestion completed.")
 
 
 if __name__ == "__main__":
