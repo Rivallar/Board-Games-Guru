@@ -14,5 +14,6 @@ dependencies = [
     "llama-index-node-parser-docling>=0.4.0",
     "llama-index-readers-docling>=0.4.0",
     "llama-index-vector-stores-chroma>=0.5.2",
+    "pymupdf>=1.26.4",
     "streamlit>=1.49.1",
 ]
