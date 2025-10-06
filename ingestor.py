@@ -4,15 +4,20 @@ Just run a command in a terminal: ingestor.py path_to_document db_collection_nam
 """
 import argparse
 from concurrent.futures import ProcessPoolExecutor, as_completed
-import fitz
 import logging
 import os
 import tempfile
+from datetime import datetime
 from typing import Iterable
 
 import chromadb
+from docling.datamodel.accelerator_options import AcceleratorOptions, AcceleratorDevice
+from docling.datamodel.base_models import InputFormat
+from docling.datamodel.pipeline_options import PdfPipelineOptions
+from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling_core.transforms.chunker.tokenizer.huggingface import HuggingFaceTokenizer
 from docling.chunking import HybridChunker
+import fitz
 from llama_index.core import StorageContext, VectorStoreIndex, Document
 from llama_index.core.ingestion import IngestionPipeline
 from llama_index.core.schema import TransformComponent
@@ -27,7 +32,7 @@ import settings
 import utils
 
 root_logger = logging.getLogger()
-root_logger.setLevel(logging.WARNING)
+root_logger.setLevel(logging.INFO)
 logger = logging.getLogger("board_games_guru.ingestor")
 logger.setLevel(logging.INFO)
 if not logger.handlers:
@@ -40,8 +45,7 @@ logger.propagate = False
 
 embed_model = HuggingFaceEmbedding(
     model_name=settings.EMBEDDING_MODEL,
-    embed_batch_size=64,
-    device="cpu"
+    device="cuda"
     )
 
 
@@ -61,7 +65,24 @@ def process_document_range(doc_path: str, start_page: int, end_page: int, temp_d
     """Get documents from a separate pdf file (chunk of bigger pdf)"""
     temp_pdf_path = os.path.join(temp_dir, f"pages_{start_page}_{end_page}.pdf")
     _extract_page_range_to_pdf(doc_path, start_page, end_page, temp_pdf_path)
-    reader = DoclingReader(export_type=DoclingReader.ExportType.JSON)
+
+    accelerator_options = AcceleratorOptions(device=AcceleratorDevice.CUDA
+    )
+    pipeline_options = PdfPipelineOptions()
+    pipeline_options.accelerator_options = accelerator_options
+    pipeline_options.do_ocr = True
+    pipeline_options.do_table_structure = True
+    pipeline_options.table_structure_options.do_cell_matching = True
+
+    converter = DocumentConverter(
+        format_options={
+            InputFormat.PDF: PdfFormatOption(
+                pipeline_options=pipeline_options,
+            )
+        }
+    )
+    reader = DoclingReader(export_type=DoclingReader.ExportType.JSON, converter=converter)
+
     docs = reader.load_data(temp_pdf_path)
     try:
         os.remove(temp_pdf_path)
@@ -185,9 +206,12 @@ def save_nodes_to_chroma(nodes, collection_name: str, file_name: str) -> None:
     logger.info(f"Step 3. {collection_name} collection had {records_before} records before.")
     vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
     storage_context = StorageContext.from_defaults(vector_store=vector_store)
-    _index = VectorStoreIndex(
-        nodes, storage_context=storage_context, embed_model=embed_model
-    )
+    while nodes:
+        logger.info(f"Step 3. Saving a chunk of 50 nodes.")
+        _index = VectorStoreIndex(
+            nodes[:50], storage_context=storage_context, embed_model=embed_model
+        )
+        nodes = nodes[50:]
     existing_metadata = chroma_collection.metadata or {}
     existing_metadata[file_name] = "source file"
     chroma_collection.modify(metadata=existing_metadata)
@@ -202,13 +226,16 @@ def main() -> None:
     parser.add_argument('collection_name', help='Name of the ChromaDB collection to store the data')
     args = parser.parse_args()
     logger.info(f"Ingestion started. \nProcessing {args.file_path} to {args.collection_name} collection.")
+    logger.debug(f"Started at {datetime.now()}")
     logger.info("Step 1. Preparing documents.")
     documents = get_documents_from_a_file(args.file_path)
+    logger.debug(f"DoclingReader finished at {datetime.now()}")
     logger.info("Step 2. Making nodes.")
     nodes = make_nodes(documents)
     logger.info("Step 3. Embedding and saving nodes to a database.")
     file_name = os.path.basename(args.file_path)
     save_nodes_to_chroma(nodes, collection_name=args.collection_name, file_name=file_name)
+    logger.debug(f"Task finished at {datetime.now()}")
     logger.info("Ingestion completed.")
 
 
