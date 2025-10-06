@@ -14,7 +14,7 @@ import prompts
 import settings
 
 query_llm = Ollama(model=settings.LLM_MODEL, **settings.LLM_KWARGS)
-embed_model = HuggingFaceEmbedding(model_name=settings.EMBEDDING_MODEL)
+embed_model = HuggingFaceEmbedding(model_name=settings.EMBEDDING_MODEL, device="cpu")
 
 
 def get_collection_files(chroma_collection) -> list[str]:
