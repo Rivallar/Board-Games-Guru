@@ -3,6 +3,7 @@ This script enriches metadata of stored nodes with node summary and questions th
 """
 import argparse
 import json
+import logging
 import sys
 
 import chromadb
@@ -14,6 +15,18 @@ from llama_index.core.schema import TextNode, TransformComponent
 from ingestor import MetadataCleaner
 import prompts
 import settings
+
+
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.ERROR)
+logger = logging.getLogger("board_games_guru.metadata_worker")
+logger.setLevel(logging.INFO)
+if not logger.handlers:
+    _handler = logging.StreamHandler()
+    _formatter = logging.Formatter("%(levelname)s: %(message)s")
+    _handler.setFormatter(_formatter)
+    logger.addHandler(_handler)
+logger.propagate = False
 
 
 metadata_llm = Ollama(model=settings.SMALL_LLM, **settings.LLM_KWARGS)
@@ -90,7 +103,7 @@ def update_chroma_with_processed_nodes(chroma_collection, enriched_nodes: list[T
         ids=node_ids,
         metadatas=enriched_metadatas
     )  
-    print(f"Updated {len(node_ids)} nodes with enriched metadata")
+    logging.info(f"Updated {len(node_ids)} nodes with enriched metadata")
 
 
 def main():
@@ -103,22 +116,24 @@ def main():
     try:
         chroma_collection = db.get_collection(args.collection_name)
     except chromadb.errors.NotFoundError as e:
-        print(e)
+        logger.error(f"Wrong collection name. Exiting.\n {e}")
         sys.exit(1)
     try:
+        logger.info("Metadata enrichment process has been started.")
         chroma_nodes = get_docs_from_chroma(chroma_collection=chroma_collection)
         while chroma_nodes.get("documents"):
             documents, metadatas, ids = chroma_nodes["documents"], chroma_nodes["metadatas"], chroma_nodes["ids"]
             li_nodes = create_nodes_from_chroma_data(documents=documents, metadatas=metadatas, ids=ids)
-            print(f"Enriching {len(li_nodes)} nodes")
+            logging.info(f"Enriching {len(li_nodes)} nodes")
             enriched_nodes = enrich_nodes_metadata(li_nodes=li_nodes)
             update_chroma_with_processed_nodes(chroma_collection=chroma_collection,
                                             enriched_nodes=enriched_nodes,
                                             node_ids=ids)
 
             chroma_nodes = get_docs_from_chroma(chroma_collection=chroma_collection)
+        logger.info(f"{chroma_collection.name} collection is ready. Exiting.")
     except KeyboardInterrupt:
-        print(" Exiting")
+        logger.info("User stopped a process. Exiting.")
         sys.exit(0)
 
 
