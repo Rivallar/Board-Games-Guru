@@ -141,7 +141,7 @@ def get_documents_from_a_file(file_path: str) -> Iterable[Document]:
     return docs
 
 
-def make_nodes(docs: Iterable[Document]) -> Iterable[BaseNode]:
+def make_nodes(docs: Iterable[Document], source_file_path: str) -> Iterable[BaseNode]:
     """Converts a list of DoclingReader documents into nodes."""
     tokenizer = HuggingFaceTokenizer(
         tokenizer=AutoTokenizer.from_pretrained(settings.EMBEDDING_MODEL),
@@ -157,7 +157,9 @@ def make_nodes(docs: Iterable[Document]) -> Iterable[BaseNode]:
     node_parser = DoclingNodeParser(chunker=chunker)
     pipeline = IngestionPipeline(transformations=[node_parser, MetadataCleaner()])
 
-    nodes = pipeline.run(documents=list(docs), in_place=True, show_progress=False)
+    nodes = pipeline.run(
+        documents=list(docs), in_place=True, show_progress=False, source_file=source_file_path
+    )
     logger.info(f"Step 2. Got {len(nodes)} nodes from a file.")
     return nodes
 
@@ -183,17 +185,30 @@ class MetadataCleaner(TransformComponent):
         for node in nodes:
             node.text_template = "Metadata:\n{metadata_str}\n-----\nContent:\n{content}"
             origin = node.metadata.get("origin", {})
-            node.metadata["source_file"] = origin.get("filename", node.metadata.get("file_name", "unknown"))
+            source_from_kwargs = kwargs.get("source_file")
+            if not node.metadata.get("source_file"):
+                if source_from_kwargs:
+                    node.metadata["source_file"] = os.path.basename(source_from_kwargs)
+                else:
+                    node.metadata["source_file"] = origin.get("filename", node.metadata.get("file_name", "unknown"))
             if "questions_this_excerpt_can_answer" in node.metadata:
                 node.metadata["questions_this_excerpt_can_answer"] = self.clean_thinking(
                     node.metadata["questions_this_excerpt_can_answer"])
+            else:
+                node.metadata["questions_this_excerpt_can_answer"] = "empty"
             for key in getattr(node, "excluded_embed_metadata_keys", []):
                 node.metadata.pop(key, None)
             if "headings" in node.metadata:
                 node.metadata["headings"] = ", ".join(node.metadata["headings"])
-            for summary in ("prev_section_summary", "next_section_summary", "section_summary"):
+            for summary in (
+                # "prev_section_summary", 
+                # "next_section_summary", 
+                "section_summary",
+                ):
                 if summary in node.metadata:
                     node.metadata[summary] = self.clean_thinking(node.metadata[summary])
+                else:
+                    node.metadata[summary] = "empty"
             node.id_ = utils.make_stable_node_id(node.get_content(), node.metadata["source_file"])
         return nodes
 
@@ -231,7 +246,7 @@ def main() -> None:
     documents = get_documents_from_a_file(args.file_path)
     logger.debug(f"DoclingReader finished at {datetime.now()}")
     logger.info("Step 2. Making nodes.")
-    nodes = make_nodes(documents)
+    nodes = make_nodes(documents, source_file_path=args.file_path)
     logger.info("Step 3. Embedding and saving nodes to a database.")
     file_name = os.path.basename(args.file_path)
     save_nodes_to_chroma(nodes, collection_name=args.collection_name, file_name=file_name)
