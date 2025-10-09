@@ -9,7 +9,7 @@ import chromadb
 from llama_index.core.extractors import SummaryExtractor, QuestionsAnsweredExtractor
 from llama_index.llms.ollama import Ollama
 from llama_index.core.ingestion import IngestionPipeline
-from llama_index.core.schema import TextNode
+from llama_index.core.schema import TextNode, TransformComponent
 
 from ingestor import MetadataCleaner
 import prompts
@@ -17,6 +17,21 @@ import settings
 
 
 metadata_llm = Ollama(model=settings.SMALL_LLM, **settings.LLM_KWARGS)
+
+
+class MetaDuplicator(TransformComponent):
+    """Copies questions and section_summary metadata from top metadata level to
+    _node_content as it is used in query_engine"""
+    def __call__(self, nodes, **kwargs):
+        for node in nodes:
+            node_content = json.loads(node.metadata.get("_node_content", "{}"))
+            new_data = {
+                "questions_this_excerpt_can_answer": node.metadata.get("questions_this_excerpt_can_answer"),
+                "section_summary": node.metadata.get("section_summary")
+            }
+            node_content["metadata"].update(new_data)
+            node.metadata["_node_content"] = json.dumps(node_content)  
+        return nodes
 
 
 def get_docs_from_chroma(chroma_collection, limit: int = 10) -> dict:
@@ -53,15 +68,14 @@ def enrich_nodes_metadata(li_nodes: list[TextNode]) -> list[TextNode]:
     pipeline = IngestionPipeline(transformations=[
         summary_extractor,
         qa_extractor,
-        MetadataCleaner()
+        MetadataCleaner(),
+        MetaDuplicator()
         ]
     )
     processed_nodes = pipeline.run(nodes=li_nodes,
                         in_place=True,
                         show_progress=True
                         )
-    for node in processed_nodes:
-    node_content = json.loads(current_metadata.get("_node_content", "{}"))    
     return processed_nodes
 
 
@@ -96,6 +110,7 @@ def main():
         while chroma_nodes.get("documents"):
             documents, metadatas, ids = chroma_nodes["documents"], chroma_nodes["metadatas"], chroma_nodes["ids"]
             li_nodes = create_nodes_from_chroma_data(documents=documents, metadatas=metadatas, ids=ids)
+            print(f"Enriching {len(li_nodes)} nodes")
             enriched_nodes = enrich_nodes_metadata(li_nodes=li_nodes)
             update_chroma_with_processed_nodes(chroma_collection=chroma_collection,
                                             enriched_nodes=enriched_nodes,
