@@ -28,7 +28,7 @@ def get_collection_files(chroma_collection) -> list[str]:
 
 def get_chat_engine(collection_name: str):
     db = chromadb.PersistentClient(path=settings.CHROMA_PERSIST_DIR)
-    chroma_collection = db.get_or_create_collection(collection_name)
+    chroma_collection = db.get_collection(collection_name)
     collection_files = get_collection_files(chroma_collection)
     vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
     chat_index = VectorStoreIndex.from_vector_store(
@@ -47,7 +47,7 @@ def get_chat_engine(collection_name: str):
     query_engine = RetrieverQueryEngine(
         retriever=retriever,
         response_synthesizer=response_synthesizer,
-        node_postprocessors=[SimilarityPostprocessor(similarity_cutoff=0.3)]
+        node_postprocessors=[SimilarityPostprocessor(similarity_cutoff=0.3, filter_empty=True, filter_duplicates=True)]
         )
 
     prompt_tmpl = PromptTemplate(
